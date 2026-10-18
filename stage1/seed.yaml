@@ -1,0 +1,169 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Stage 1 seed (management account): Terraform state bucket for lab-infra-org,
+  GitHub OIDC provider and the plan/apply roles used by the lab-infra-org pipeline.
+
+Parameters:
+  GitHubOwner:
+    Type: String
+    Description: GitHub user or organization that owns the lab-* repositories.
+  OrgRepo:
+    Type: String
+    Default: lab-infra-org
+  CreateOidcProvider:
+    Type: String
+    Default: "true"
+    AllowedValues: ["true", "false"]
+    Description: Set to false if the GitHub OIDC provider already exists in this account.
+
+Conditions:
+  CreateProvider: !Equals [!Ref CreateOidcProvider, "true"]
+
+Resources:
+  StateBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub lab-tfstate-org-${AWS::AccountId}
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-old-versions
+            Status: Enabled
+            NoncurrentVersionExpiration:
+              NoncurrentDays: 90
+      Tags:
+        - { Key: Project, Value: lab }
+        - { Key: Env, Value: management }
+        - { Key: ManagedBy, Value: cloudformation }
+
+  StateBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref StateBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource:
+              - !GetAtt StateBucket.Arn
+              - !Sub ${StateBucket.Arn}/*
+            Condition:
+              Bool:
+                aws:SecureTransport: "false"
+
+  GitHubOidcProvider:
+    Type: AWS::IAM::OIDCProvider
+    Condition: CreateProvider
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList:
+        - sts.amazonaws.com
+
+  # Read-only role for pull_request runs (terraform plan).
+  PlanRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: lab-github-org-plan
+      MaxSessionDuration: 3600
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/ReadOnlyAccess
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:oidc-provider/token.actions.githubusercontent.com
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+                token.actions.githubusercontent.com:sub: !Sub repo:${GitHubOwner}/${OrgRepo}:pull_request
+      Policies:
+        - PolicyName: state-access
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: ReadState
+                Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub ${StateBucket.Arn}/*
+              - Sid: LockFile
+                Effect: Allow
+                Action: ["s3:PutObject", "s3:DeleteObject"]
+                Resource: !Sub ${StateBucket.Arn}/*.tflock
+              - Effect: Allow
+                Action: s3:ListBucket
+                Resource: !GetAtt StateBucket.Arn
+    DependsOn: [StateBucketPolicy, GitHubOidcProvider]
+
+  # Write role, assumable only from the protected GitHub Environment "org-apply".
+  ApplyRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: lab-github-org-apply
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:oidc-provider/token.actions.githubusercontent.com
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+                token.actions.githubusercontent.com:sub: !Sub repo:${GitHubOwner}/${OrgRepo}:environment:org-apply
+      Policies:
+        - PolicyName: org-management
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: OrganizationAndIdentity
+                Effect: Allow
+                Action:
+                  - organizations:*
+                  - sso:*
+                  - sso-directory:*
+                  - identitystore:*
+                  - cloudtrail:*
+                  - budgets:*
+                  - account:*
+                  - iam:CreateServiceLinkedRole
+                  - iam:GetRole
+                  - iam:ListRoles
+                Resource: "*"
+              - Sid: StateBucketObjects
+                Effect: Allow
+                Action: ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
+                Resource: !Sub ${StateBucket.Arn}/*
+              - Sid: StateBucketList
+                Effect: Allow
+                Action: s3:ListBucket
+                Resource: !GetAtt StateBucket.Arn
+    DependsOn: [StateBucketPolicy, GitHubOidcProvider]
+
+Outputs:
+  StateBucketName:
+    Value: !Ref StateBucket
+  PlanRoleArn:
+    Value: !GetAtt PlanRole.Arn
+  ApplyRoleArn:
+    Value: !GetAtt ApplyRole.Arn

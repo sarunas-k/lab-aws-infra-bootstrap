@@ -1,0 +1,4 @@
+[
+  { "ParameterKey": "GitHubOwner", "ParameterValue": "YOUR_GITHUB_USER_OR_ORG" },
+  { "ParameterKey": "CreateOidcProvider", "ParameterValue": "true" }
+]
