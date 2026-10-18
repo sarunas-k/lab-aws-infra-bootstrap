@@ -70,7 +70,7 @@ Roles created in each workload account (the environment is derived from the acco
 | `lab-github-platform-plan` | `lab-infra-platform` pull requests | ReadOnlyAccess + state lock |
 | `lab-github-cost-guard` | `lab-infra-platform` `main` (scheduled and manual runs) | ReadOnlyAccess |
 | `lab-github-platform-apply` | `lab-infra-platform` GitHub Environment `<env>` | AdministratorAccess (single-purpose account, SCPs, approval gate) |
-| `lab-github-ecr-push` | app repos, Environment `<env>` | Push to `lab-*` ECR repositories |
+| `lab-github-ecr-push` | `lab-backend`, `lab-web`, Environment `<env>` | Push to `lab-*` ECR repositories |
 | `lab-github-assets-sync` | `lab-web`, Environment `<env>` | Sync `images/` of `lab-<env>-assets` |
 
 State isolation: the shared bucket policy lets each environment account use only its own `envs/<env>/` prefix

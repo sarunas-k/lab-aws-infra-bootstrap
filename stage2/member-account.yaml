@@ -21,7 +21,7 @@ Parameters:
     Default: lab-infra-platform
   AppRepos:
     Type: CommaDelimitedList
-    Default: lab-backend,lab-web,lab-cluster
+    Default: lab-backend,lab-web
   WebRepo:
     Type: String
     Default: lab-web
@@ -160,10 +160,6 @@ Resources:
                   - !Sub
                     - repo:${GitHubOwner}/${Repo}:environment:${Env}
                     - Repo: !Select [1, !Ref AppRepos]
-                      Env: !If [IsDev, dev, !If [IsTest, test, prod]]
-                  - !Sub
-                    - repo:${GitHubOwner}/${Repo}:environment:${Env}
-                    - Repo: !Select [2, !Ref AppRepos]
                       Env: !If [IsDev, dev, !If [IsTest, test, prod]]
       Policies:
         - PolicyName: ecr-push
