@@ -83,7 +83,30 @@ Resources:
                 Action: s3:ListBucket
                 Resource: !Sub arn:${AWS::Partition}:s3:::lab-tfstate-platform-${SharedServicesAccountId}
 
-  # terraform apply/destroy, only from the GitHub Environment named after the account's env.
+  # Scheduled cost guard: lists running EKS clusters and NAT gateways. Scheduled and manually dispatched
+  # runs use the default branch ref, so the subject is the main branch of the platform repository.
+  CostGuardRole:
+    Type: AWS::IAM::Role
+    Condition: KnownEnv
+    DependsOn: GitHubOidcProvider
+    Properties:
+      RoleName: lab-github-cost-guard
+      MaxSessionDuration: 3600
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/ReadOnlyAccess
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:oidc-provider/token.actions.githubusercontent.com
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+                token.actions.githubusercontent.com:sub: !Sub repo:${GitHubOwner}/${PlatformRepo}:ref:refs/heads/main
+
+  # terraform apply, only from the GitHub Environment named after the account's env.
   # AdministratorAccess because the platform creates IAM roles, EKS, CloudFront, WAF, etc.
   # Blast radius is limited by the single-purpose account, the SCPs and the environment approval.
   PlatformApplyRole:

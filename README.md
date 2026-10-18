@@ -68,11 +68,12 @@ Roles created in each workload account (the environment is derived from the acco
 | Role | Assumable from | Permissions |
 |---|---|---|
 | `lab-github-platform-plan` | `lab-infra-platform` pull requests | ReadOnlyAccess + state lock |
+| `lab-github-cost-guard` | `lab-infra-platform` `main` (scheduled and manual runs) | ReadOnlyAccess |
 | `lab-github-platform-apply` | `lab-infra-platform` GitHub Environment `<env>` | AdministratorAccess (single-purpose account, SCPs, approval gate) |
 | `lab-github-ecr-push` | app repos, Environment `<env>` | Push to `lab-*` ECR repositories |
 | `lab-github-assets-sync` | `lab-web`, Environment `<env>` | Sync `images/` of `lab-<env>-assets` |
 
 State isolation: the shared bucket policy lets each environment account use only its own `envs/<env>/` prefix
-(by `aws:PrincipalAccount`), so the dev apply role cannot read or modify test or prod state. Terraform backends in
+(by `aws:PrincipalAccount`), so the dev apply role cannot read or modify test or prod state. Principals are the `lab-github-platform-*` roles and the IAM Identity Center (`AWSReservedSSO_*`) roles of the operator, who runs `scripts/destroy.sh` locally. Terraform backends in
 `lab-infra-platform` must therefore use keys like `envs/<env>/<stack>/terraform.tfstate`. The `lab-shared-state`
 StackSet also needs `DevAccountId`, `TestAccountId` and `ProdAccountId` parameters.

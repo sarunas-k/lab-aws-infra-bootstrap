@@ -3,6 +3,7 @@ Description: >
   Stage 2 shared services (deployed as a service-managed StackSet to the Infrastructure OU):
   Terraform state bucket for lab-infra-platform and lab-github-workflows consumers.
   Each environment account can only use the envs/<env>/ prefix, enforced here in the bucket policy.
+  Callers are the lab-github-platform-* CI roles and IAM Identity Center (SSO) roles of the operator, for the local destroy.
 
 Parameters:
   OrganizationId:
@@ -74,7 +75,9 @@ Resources:
                 aws:PrincipalOrgID: !Ref OrganizationId
                 aws:PrincipalAccount: !Ref DevAccountId
               ArnLike:
-                aws:PrincipalArn: arn:aws:iam::*:role/lab-github-platform-*
+                aws:PrincipalArn:
+                  - arn:aws:iam::*:role/lab-github-platform-*
+                  - arn:aws:iam::*:role/aws-reserved/sso.amazonaws.com/*AWSReservedSSO_*
           - Sid: AllowDevList
             Effect: Allow
             Principal: "*"
@@ -87,7 +90,9 @@ Resources:
               StringLike:
                 s3:prefix: ["envs/dev/*", "envs/dev"]
               ArnLike:
-                aws:PrincipalArn: arn:aws:iam::*:role/lab-github-platform-*
+                aws:PrincipalArn:
+                  - arn:aws:iam::*:role/lab-github-platform-*
+                  - arn:aws:iam::*:role/aws-reserved/sso.amazonaws.com/*AWSReservedSSO_*
           - Sid: AllowTestObjects
             Effect: Allow
             Principal: "*"
@@ -98,7 +103,9 @@ Resources:
                 aws:PrincipalOrgID: !Ref OrganizationId
                 aws:PrincipalAccount: !Ref TestAccountId
               ArnLike:
-                aws:PrincipalArn: arn:aws:iam::*:role/lab-github-platform-*
+                aws:PrincipalArn:
+                  - arn:aws:iam::*:role/lab-github-platform-*
+                  - arn:aws:iam::*:role/aws-reserved/sso.amazonaws.com/*AWSReservedSSO_*
           - Sid: AllowTestList
             Effect: Allow
             Principal: "*"
@@ -111,7 +118,9 @@ Resources:
               StringLike:
                 s3:prefix: ["envs/test/*", "envs/test"]
               ArnLike:
-                aws:PrincipalArn: arn:aws:iam::*:role/lab-github-platform-*
+                aws:PrincipalArn:
+                  - arn:aws:iam::*:role/lab-github-platform-*
+                  - arn:aws:iam::*:role/aws-reserved/sso.amazonaws.com/*AWSReservedSSO_*
           - Sid: AllowProdObjects
             Effect: Allow
             Principal: "*"
@@ -122,7 +131,9 @@ Resources:
                 aws:PrincipalOrgID: !Ref OrganizationId
                 aws:PrincipalAccount: !Ref ProdAccountId
               ArnLike:
-                aws:PrincipalArn: arn:aws:iam::*:role/lab-github-platform-*
+                aws:PrincipalArn:
+                  - arn:aws:iam::*:role/lab-github-platform-*
+                  - arn:aws:iam::*:role/aws-reserved/sso.amazonaws.com/*AWSReservedSSO_*
           - Sid: AllowProdList
             Effect: Allow
             Principal: "*"
@@ -135,7 +146,9 @@ Resources:
               StringLike:
                 s3:prefix: ["envs/prod/*", "envs/prod"]
               ArnLike:
-                aws:PrincipalArn: arn:aws:iam::*:role/lab-github-platform-*
+                aws:PrincipalArn:
+                  - arn:aws:iam::*:role/lab-github-platform-*
+                  - arn:aws:iam::*:role/aws-reserved/sso.amazonaws.com/*AWSReservedSSO_*
 
 Outputs:
   PlatformStateBucketName:
