@@ -1,12 +1,12 @@
-# lab-bootstrap
+# lab-aws-infra-bootstrap
 
 CloudFormation seed stacks for the lab AWS organization. CloudFormation is used here only for the
 chicken-and-egg resources that Terraform cannot create for itself.
 
 | Stage | Account | Contents | Status |
 |---|---|---|---|
-| `stage1/` | lab-management | Terraform state bucket, GitHub OIDC provider, plan/apply roles for `lab-infra-org` | ready |
-| `stage2/` | management (StackSets) | `member-account.yaml`: OIDC provider + CI roles per workload account. `shared-state.yaml`: platform state bucket | ready, deploy after `lab-infra-org` |
+| `stage1/` | lab-management | Terraform state bucket, GitHub OIDC provider, plan/apply roles for `lab-aws-infra-organization` | ready |
+| `stage2/` | management (StackSets) | `member-account.yaml`: OIDC provider + CI roles per workload account. `shared-state.yaml`: platform state bucket | ready, deploy after `lab-aws-infra-organization` |
 
 ## Stage 1
 
@@ -20,16 +20,16 @@ aws cloudformation deploy \
   --parameter-overrides GitHubOwner=<your-github-user-or-org>
 ```
 
-Outputs: state bucket name and the two role ARNs. Use them in the `lab-infra-org` backend config and workflow.
+Outputs: state bucket name and the two role ARNs. Use them in the `lab-aws-infra-organization` backend config and workflow.
 
-- `lab-github-org-plan`: read-only, assumable only from `pull_request` runs of `lab-infra-org`.
+- `lab-github-org-plan`: read-only, assumable only from `pull_request` runs of `lab-aws-infra-organization`.
 - `lab-github-org-apply`: write access, assumable only from the protected GitHub Environment `org-apply`.
 - The state bucket is versioned, encrypted, private, TLS-only and retained if the stack is deleted.
 - If the GitHub OIDC provider already exists in the account, pass `CreateOidcProvider=false`.
 
 The apply role grants Organizations, IAM Identity Center, CloudTrail, Budgets and Account service permissions.
 It is broad by design for an org-management pipeline, so protect it with the environment approval and
-the strict branch ruleset on `lab-infra-org`.
+the strict branch ruleset on `lab-aws-infra-organization`.
 
 ## Validate locally
 
@@ -39,8 +39,8 @@ pip install cfn-lint && cfn-lint stage1/seed.yaml
 
 ## Stage 2
 
-Run after `lab-infra-org` has created the accounts and OUs. Service-managed StackSets need trusted access
-(`member.org.stacksets.cloudformation.amazonaws.com`, enabled by `lab-infra-org`).
+Run after `lab-aws-infra-organization` has created the accounts and OUs. Service-managed StackSets need trusted access
+(`member.org.stacksets.cloudformation.amazonaws.com`, enabled by `lab-aws-infra-organization`).
 
 ```bash
 # Workloads OU: OIDC provider and CI roles. IAM is global, so deploy to the home region only.
@@ -67,13 +67,13 @@ Roles created in each workload account (the environment is derived from the acco
 
 | Role | Assumable from | Permissions |
 |---|---|---|
-| `lab-github-platform-plan` | `lab-infra-platform` pull requests | ReadOnlyAccess + state lock |
-| `lab-github-cost-guard` | `lab-infra-platform` `main` (scheduled and manual runs) | ReadOnlyAccess |
-| `lab-github-platform-apply` | `lab-infra-platform` GitHub Environment `<env>` | AdministratorAccess (single-purpose account, SCPs, approval gate) |
-| `lab-github-ecr-push` | `lab-backend`, `lab-web`, Environment `<env>` | Push to `lab-*` ECR repositories |
-| `lab-github-assets-sync` | `lab-web`, Environment `<env>` | Sync `images/` of `lab-<env>-assets` |
+| `lab-github-platform-plan` | `lab-aws-infra-environments` pull requests | ReadOnlyAccess + state lock |
+| `lab-github-cost-guard` | `lab-aws-infra-environments` `main` (scheduled and manual runs) | ReadOnlyAccess |
+| `lab-github-platform-apply` | `lab-aws-infra-environments` GitHub Environment `<env>` | AdministratorAccess (single-purpose account, SCPs, approval gate) |
+| `lab-github-ecr-push` | `lab-aws-backend`, `lab-aws-web`, Environment `<env>` | Push to `lab-*` ECR repositories |
+| `lab-github-assets-sync` | `lab-aws-web`, Environment `<env>` | Sync `images/` of `lab-<env>-assets` |
 
 State isolation: the shared bucket policy lets each environment account use only its own `envs/<env>/` prefix
 (by `aws:PrincipalAccount`), so the dev apply role cannot read or modify test or prod state. Principals are the `lab-github-platform-*` roles and the IAM Identity Center (`AWSReservedSSO_*`) roles of the operator, who runs `scripts/destroy.sh` locally. Terraform backends in
-`lab-infra-platform` must therefore use keys like `envs/<env>/<stack>/terraform.tfstate`. The `lab-shared-state`
+`lab-aws-infra-environments` must therefore use keys like `envs/<env>/<stack>/terraform.tfstate`. The `lab-shared-state`
 StackSet also needs `DevAccountId`, `TestAccountId` and `ProdAccountId` parameters.

@@ -8,6 +8,6 @@ permissions:
 
 jobs:
   cfn:
-    uses: sarunas-k/lab-github-workflows/.github/workflows/cfn-ci.yml@main
+    uses: sarunas-k/lab-aws-github-workflows/.github/workflows/cfn-ci.yml@main
     with:
       templates: "stage*/*.yaml"

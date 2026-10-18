@@ -1,7 +1,7 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >
   Stage 2 shared services (deployed as a service-managed StackSet to the Infrastructure OU):
-  Terraform state bucket for lab-infra-platform and lab-github-workflows consumers.
+  Terraform state bucket for lab-aws-infra-environments and lab-aws-github-workflows consumers.
   Each environment account can only use the envs/<env>/ prefix, enforced here in the bucket policy.
   Callers are the lab-github-platform-* CI roles and IAM Identity Center (SSO) roles of the operator, for the local destroy.
 

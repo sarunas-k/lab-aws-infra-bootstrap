@@ -1,7 +1,7 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >
-  Stage 1 seed (management account): Terraform state bucket for lab-infra-org,
-  GitHub OIDC provider and the plan/apply roles used by the lab-infra-org pipeline.
+  Stage 1 seed (management account): Terraform state bucket for lab-aws-infra-organization,
+  GitHub OIDC provider and the plan/apply roles used by the lab-aws-infra-organization pipeline.
 
 Parameters:
   GitHubOwner:
@@ -9,7 +9,7 @@ Parameters:
     Description: GitHub user or organization that owns the lab-* repositories.
   OrgRepo:
     Type: String
-    Default: lab-infra-org
+    Default: lab-aws-infra-organization
   CreateOidcProvider:
     Type: String
     Default: "true"

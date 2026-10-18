@@ -1,7 +1,7 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >
   Stage 2 member account baseline (deployed as a service-managed StackSet to the Workloads OU):
-  GitHub OIDC provider and the CI roles for lab-infra-platform and the application repositories.
+  GitHub OIDC provider and the CI roles for lab-aws-infra-environments and the application repositories.
   The environment (dev/test/prod) is derived from the account id.
 
 Parameters:
@@ -18,13 +18,13 @@ Parameters:
     Description: Account that holds the platform Terraform state bucket.
   PlatformRepo:
     Type: String
-    Default: lab-infra-platform
+    Default: lab-aws-infra-environments
   AppRepos:
     Type: CommaDelimitedList
-    Default: lab-backend,lab-web
+    Default: lab-aws-backend,lab-aws-web
   WebRepo:
     Type: String
-    Default: lab-web
+    Default: lab-aws-web
 
 Conditions:
   IsDev: !Equals [!Ref "AWS::AccountId", !Ref DevAccountId]
@@ -184,7 +184,7 @@ Resources:
                   - ecr:UploadLayerPart
                 Resource: !Sub arn:${AWS::Partition}:ecr:*:${AWS::AccountId}:repository/lab-*
 
-  # lab-web CI: sync images to the environment's assets bucket.
+  # lab-aws-web CI: sync images to the environment's assets bucket.
   AssetsSyncRole:
     Type: AWS::IAM::Role
     Condition: KnownEnv
