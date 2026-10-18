@@ -1,0 +1,142 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Stage 2 shared services (deployed as a service-managed StackSet to the Infrastructure OU):
+  Terraform state bucket for lab-infra-platform and lab-github-workflows consumers.
+  Each environment account can only use the envs/<env>/ prefix, enforced here in the bucket policy.
+
+Parameters:
+  OrganizationId:
+    Type: String
+    Description: AWS Organizations id (o-xxxxxxxxxx).
+  DevAccountId:
+    Type: String
+  TestAccountId:
+    Type: String
+  ProdAccountId:
+    Type: String
+
+Resources:
+  PlatformStateBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub lab-tfstate-platform-${AWS::AccountId}
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-old-versions
+            Status: Enabled
+            NoncurrentVersionExpiration:
+              NoncurrentDays: 90
+      Tags:
+        - { Key: Project, Value: lab }
+        - { Key: Env, Value: shared }
+        - { Key: ManagedBy, Value: cloudformation }
+
+  PlatformStateBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref PlatformStateBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource:
+              - !GetAtt PlatformStateBucket.Arn
+              - !Sub ${PlatformStateBucket.Arn}/*
+            Condition:
+              Bool:
+                aws:SecureTransport: "false"
+          - Sid: AllowDevObjects
+            Effect: Allow
+            Principal: "*"
+            Action: [s3:GetObject, s3:PutObject, s3:DeleteObject]
+            Resource: !Sub ${PlatformStateBucket.Arn}/envs/dev/*
+            Condition:
+              StringEquals:
+                aws:PrincipalOrgID: !Ref OrganizationId
+                aws:PrincipalAccount: !Ref DevAccountId
+              ArnLike:
+                aws:PrincipalArn: arn:aws:iam::*:role/lab-github-platform-*
+          - Sid: AllowDevList
+            Effect: Allow
+            Principal: "*"
+            Action: s3:ListBucket
+            Resource: !GetAtt PlatformStateBucket.Arn
+            Condition:
+              StringEquals:
+                aws:PrincipalOrgID: !Ref OrganizationId
+                aws:PrincipalAccount: !Ref DevAccountId
+              StringLike:
+                s3:prefix: ["envs/dev/*", "envs/dev"]
+              ArnLike:
+                aws:PrincipalArn: arn:aws:iam::*:role/lab-github-platform-*
+          - Sid: AllowTestObjects
+            Effect: Allow
+            Principal: "*"
+            Action: [s3:GetObject, s3:PutObject, s3:DeleteObject]
+            Resource: !Sub ${PlatformStateBucket.Arn}/envs/test/*
+            Condition:
+              StringEquals:
+                aws:PrincipalOrgID: !Ref OrganizationId
+                aws:PrincipalAccount: !Ref TestAccountId
+              ArnLike:
+                aws:PrincipalArn: arn:aws:iam::*:role/lab-github-platform-*
+          - Sid: AllowTestList
+            Effect: Allow
+            Principal: "*"
+            Action: s3:ListBucket
+            Resource: !GetAtt PlatformStateBucket.Arn
+            Condition:
+              StringEquals:
+                aws:PrincipalOrgID: !Ref OrganizationId
+                aws:PrincipalAccount: !Ref TestAccountId
+              StringLike:
+                s3:prefix: ["envs/test/*", "envs/test"]
+              ArnLike:
+                aws:PrincipalArn: arn:aws:iam::*:role/lab-github-platform-*
+          - Sid: AllowProdObjects
+            Effect: Allow
+            Principal: "*"
+            Action: [s3:GetObject, s3:PutObject, s3:DeleteObject]
+            Resource: !Sub ${PlatformStateBucket.Arn}/envs/prod/*
+            Condition:
+              StringEquals:
+                aws:PrincipalOrgID: !Ref OrganizationId
+                aws:PrincipalAccount: !Ref ProdAccountId
+              ArnLike:
+                aws:PrincipalArn: arn:aws:iam::*:role/lab-github-platform-*
+          - Sid: AllowProdList
+            Effect: Allow
+            Principal: "*"
+            Action: s3:ListBucket
+            Resource: !GetAtt PlatformStateBucket.Arn
+            Condition:
+              StringEquals:
+                aws:PrincipalOrgID: !Ref OrganizationId
+                aws:PrincipalAccount: !Ref ProdAccountId
+              StringLike:
+                s3:prefix: ["envs/prod/*", "envs/prod"]
+              ArnLike:
+                aws:PrincipalArn: arn:aws:iam::*:role/lab-github-platform-*
+
+Outputs:
+  PlatformStateBucketName:
+    Value: !Ref PlatformStateBucket

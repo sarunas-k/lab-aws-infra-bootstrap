@@ -6,7 +6,7 @@ chicken-and-egg resources that Terraform cannot create for itself.
 | Stage | Account | Contents | Status |
 |---|---|---|---|
 | `stage1/` | lab-management | Terraform state bucket, GitHub OIDC provider, plan/apply roles for `lab-infra-org` | ready |
-| `stage2/` | management (StackSet) | OIDC provider + deployer role in every member account, platform state bucket | after `lab-infra-org` |
+| `stage2/` | management (StackSets) | `member-account.yaml`: OIDC provider + CI roles per workload account. `shared-state.yaml`: platform state bucket | ready, deploy after `lab-infra-org` |
 
 ## Stage 1
 
@@ -36,3 +36,43 @@ the strict branch ruleset on `lab-infra-org`.
 ```bash
 pip install cfn-lint && cfn-lint stage1/seed.yaml
 ```
+
+## Stage 2
+
+Run after `lab-infra-org` has created the accounts and OUs. Service-managed StackSets need trusted access
+(`member.org.stacksets.cloudformation.amazonaws.com`, enabled by `lab-infra-org`).
+
+```bash
+# Workloads OU: OIDC provider and CI roles. IAM is global, so deploy to the home region only.
+aws cloudformation create-stack-set --stack-set-name lab-member-account \
+  --template-body file://stage2/member-account.yaml \
+  --permission-model SERVICE_MANAGED --auto-deployment Enabled=true,RetainStacksOnAccountRemoval=true \
+  --capabilities CAPABILITY_NAMED_IAM \
+  --parameters ParameterKey=GitHubOwner,ParameterValue=<owner> \
+    ParameterKey=DevAccountId,ParameterValue=<id> ParameterKey=TestAccountId,ParameterValue=<id> \
+    ParameterKey=ProdAccountId,ParameterValue=<id> ParameterKey=SharedServicesAccountId,ParameterValue=<id>
+aws cloudformation create-stack-instances --stack-set-name lab-member-account \
+  --deployment-targets OrganizationalUnitIds=<workloads-ou-id> --regions eu-central-1
+
+# Infrastructure OU: platform state bucket.
+aws cloudformation create-stack-set --stack-set-name lab-shared-state \
+  --template-body file://stage2/shared-state.yaml --permission-model SERVICE_MANAGED \
+  --auto-deployment Enabled=false --parameters ParameterKey=OrganizationId,ParameterValue=<o-xxxx> \\
+    ParameterKey=DevAccountId,ParameterValue=<id> ParameterKey=TestAccountId,ParameterValue=<id> ParameterKey=ProdAccountId,ParameterValue=<id>
+aws cloudformation create-stack-instances --stack-set-name lab-shared-state \
+  --deployment-targets OrganizationalUnitIds=<infrastructure-ou-id> --regions eu-central-1
+```
+
+Roles created in each workload account (the environment is derived from the account id):
+
+| Role | Assumable from | Permissions |
+|---|---|---|
+| `lab-github-platform-plan` | `lab-infra-platform` pull requests | ReadOnlyAccess + state lock |
+| `lab-github-platform-apply` | `lab-infra-platform` GitHub Environment `<env>` | AdministratorAccess (single-purpose account, SCPs, approval gate) |
+| `lab-github-ecr-push` | app repos, Environment `<env>` | Push to `lab-*` ECR repositories |
+| `lab-github-assets-sync` | `lab-web`, Environment `<env>` | Sync `images/` of `lab-<env>-assets` |
+
+State isolation: the shared bucket policy lets each environment account use only its own `envs/<env>/` prefix
+(by `aws:PrincipalAccount`), so the dev apply role cannot read or modify test or prod state. Terraform backends in
+`lab-infra-platform` must therefore use keys like `envs/<env>/<stack>/terraform.tfstate`. The `lab-shared-state`
+StackSet also needs `DevAccountId`, `TestAccountId` and `ProdAccountId` parameters.

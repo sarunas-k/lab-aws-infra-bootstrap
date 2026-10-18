@@ -1,0 +1,208 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Stage 2 member account baseline (deployed as a service-managed StackSet to the Workloads OU):
+  GitHub OIDC provider and the CI roles for lab-infra-platform and the application repositories.
+  The environment (dev/test/prod) is derived from the account id.
+
+Parameters:
+  GitHubOwner:
+    Type: String
+  DevAccountId:
+    Type: String
+  TestAccountId:
+    Type: String
+  ProdAccountId:
+    Type: String
+  SharedServicesAccountId:
+    Type: String
+    Description: Account that holds the platform Terraform state bucket.
+  PlatformRepo:
+    Type: String
+    Default: lab-infra-platform
+  AppRepos:
+    Type: CommaDelimitedList
+    Default: lab-backend,lab-web,lab-cluster
+  WebRepo:
+    Type: String
+    Default: lab-web
+
+Conditions:
+  IsDev: !Equals [!Ref "AWS::AccountId", !Ref DevAccountId]
+  IsTest: !Equals [!Ref "AWS::AccountId", !Ref TestAccountId]
+  IsProd: !Equals [!Ref "AWS::AccountId", !Ref ProdAccountId]
+  KnownEnv: !Or [!Condition IsDev, !Condition IsTest, !Condition IsProd]
+
+Resources:
+  GitHubOidcProvider:
+    Type: AWS::IAM::OIDCProvider
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList:
+        - sts.amazonaws.com
+
+  # terraform plan on pull requests: read-only plus state lock access under envs/<env>/.
+  PlatformPlanRole:
+    Type: AWS::IAM::Role
+    Condition: KnownEnv
+    DependsOn: GitHubOidcProvider
+    Properties:
+      RoleName: lab-github-platform-plan
+      MaxSessionDuration: 3600
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/ReadOnlyAccess
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:oidc-provider/token.actions.githubusercontent.com
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+                token.actions.githubusercontent.com:sub: !Sub repo:${GitHubOwner}/${PlatformRepo}:pull_request
+      Policies:
+        - PolicyName: state-access
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: ReadState
+                Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub
+                  - arn:${AWS::Partition}:s3:::lab-tfstate-platform-${SharedServicesAccountId}/envs/${Env}/*
+                  - Env: !If [IsDev, dev, !If [IsTest, test, prod]]
+              - Sid: LockFile
+                Effect: Allow
+                Action: ["s3:PutObject", "s3:DeleteObject"]
+                Resource: !Sub
+                  - arn:${AWS::Partition}:s3:::lab-tfstate-platform-${SharedServicesAccountId}/envs/${Env}/*.tflock
+                  - Env: !If [IsDev, dev, !If [IsTest, test, prod]]
+              - Sid: ListState
+                Effect: Allow
+                Action: s3:ListBucket
+                Resource: !Sub arn:${AWS::Partition}:s3:::lab-tfstate-platform-${SharedServicesAccountId}
+
+  # terraform apply/destroy, only from the GitHub Environment named after the account's env.
+  # AdministratorAccess because the platform creates IAM roles, EKS, CloudFront, WAF, etc.
+  # Blast radius is limited by the single-purpose account, the SCPs and the environment approval.
+  PlatformApplyRole:
+    Type: AWS::IAM::Role
+    Condition: KnownEnv
+    DependsOn: GitHubOidcProvider
+    Properties:
+      RoleName: lab-github-platform-apply
+      MaxSessionDuration: 7200
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AdministratorAccess
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:oidc-provider/token.actions.githubusercontent.com
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+                token.actions.githubusercontent.com:sub: !Sub
+                  - repo:${GitHubOwner}/${PlatformRepo}:environment:${Env}
+                  - Env: !If [IsDev, dev, !If [IsTest, test, prod]]
+
+  # Application CI: push signed images to this account's ECR. Assumable only from the
+  # repository's GitHub Environment named after the env (dev/test/prod).
+  EcrPushRole:
+    Type: AWS::IAM::Role
+    Condition: KnownEnv
+    DependsOn: GitHubOidcProvider
+    Properties:
+      RoleName: lab-github-ecr-push
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:oidc-provider/token.actions.githubusercontent.com
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+              StringLike:
+                token.actions.githubusercontent.com:sub:
+                  - !Sub
+                    - repo:${GitHubOwner}/${Repo}:environment:${Env}
+                    - Repo: !Select [0, !Ref AppRepos]
+                      Env: !If [IsDev, dev, !If [IsTest, test, prod]]
+                  - !Sub
+                    - repo:${GitHubOwner}/${Repo}:environment:${Env}
+                    - Repo: !Select [1, !Ref AppRepos]
+                      Env: !If [IsDev, dev, !If [IsTest, test, prod]]
+                  - !Sub
+                    - repo:${GitHubOwner}/${Repo}:environment:${Env}
+                    - Repo: !Select [2, !Ref AppRepos]
+                      Env: !If [IsDev, dev, !If [IsTest, test, prod]]
+      Policies:
+        - PolicyName: ecr-push
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: Login
+                Effect: Allow
+                Action: ecr:GetAuthorizationToken
+                Resource: "*"
+              - Sid: Push
+                Effect: Allow
+                Action:
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:BatchGetImage
+                  - ecr:CompleteLayerUpload
+                  - ecr:DescribeImages
+                  - ecr:DescribeImageScanFindings
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:InitiateLayerUpload
+                  - ecr:PutImage
+                  - ecr:UploadLayerPart
+                Resource: !Sub arn:${AWS::Partition}:ecr:*:${AWS::AccountId}:repository/lab-*
+
+  # lab-web CI: sync images to the environment's assets bucket.
+  AssetsSyncRole:
+    Type: AWS::IAM::Role
+    Condition: KnownEnv
+    DependsOn: GitHubOidcProvider
+    Properties:
+      RoleName: lab-github-assets-sync
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:oidc-provider/token.actions.githubusercontent.com
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+                token.actions.githubusercontent.com:sub: !Sub
+                  - repo:${GitHubOwner}/${WebRepo}:environment:${Env}
+                  - Env: !If [IsDev, dev, !If [IsTest, test, prod]]
+      Policies:
+        - PolicyName: assets-sync
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: ["s3:PutObject", "s3:DeleteObject", "s3:GetObject"]
+                Resource: !Sub
+                  - arn:${AWS::Partition}:s3:::lab-${Env}-assets/images/*
+                  - Env: !If [IsDev, dev, !If [IsTest, test, prod]]
+              - Effect: Allow
+                Action: s3:ListBucket
+                Resource: !Sub
+                  - arn:${AWS::Partition}:s3:::lab-${Env}-assets
+                  - Env: !If [IsDev, dev, !If [IsTest, test, prod]]
+
+Outputs:
+  Environment:
+    Condition: KnownEnv
+    Value: !If [IsDev, dev, !If [IsTest, test, prod]]
